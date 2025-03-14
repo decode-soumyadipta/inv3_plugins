@@ -8,5 +8,4 @@ def load():
     """
     top_window = wx.GetApp().GetTopWindow()
     window = gui.MaskMorphologyGUI(top_window)
-    window.ShowModal()
-    window.Destroy() 
+    window.Show() 

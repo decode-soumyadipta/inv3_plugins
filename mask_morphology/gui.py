@@ -107,6 +107,13 @@ class MaskMorphologyGUI(wx.Dialog):
         logger.info(f"Binary mask shape: {binary_mask.shape}")
         logger.info(f"Binary mask non-zero elements: {np.count_nonzero(binary_mask)}")
         
+        # Check if the binary mask is empty
+        if np.count_nonzero(binary_mask) == 0:
+            logger.warning("The selected mask is empty. No operation can be performed.")
+            wx.MessageBox("The selected mask is empty. Please select a mask with content.",
+                         "Empty Mask", wx.OK | wx.ICON_WARNING)
+            return
+        
         try:
             start_time = time.time()
             logger.info("Starting morphological operation")
@@ -137,30 +144,52 @@ class MaskMorphologyGUI(wx.Dialog):
                 if operation == 0:  # Erosion
                     logger.info("Applying 3D erosion")
                     result = binary_erosion(binary_mask, struct_elem)
+                    logger.info(f"Erosion result non-zero elements: {np.count_nonzero(result)}")
                 else:  # Dilation
                     logger.info("Applying 3D dilation")
                     result = binary_dilation(binary_mask, struct_elem)
+                    logger.info(f"Dilation result non-zero elements: {np.count_nonzero(result)}")
             
             end_time = time.time()
             logger.info(f"Operation completed in {end_time - start_time:.2f} seconds")
             logger.info(f"Result non-zero elements: {np.count_nonzero(result)}")
             
-            # Update the mask
-            mask_matrix[1:, 1:, 1:] = result.astype(np.uint8) * 255
+            # Check if result is empty
+            if np.count_nonzero(result) == 0 and operation == 0:  # Erosion resulted in empty mask
+                logger.warning("Erosion resulted in an empty mask. Consider using a smaller radius.")
+                wx.MessageBox("The erosion operation resulted in an empty mask. Consider using a smaller radius.",
+                             "Empty Result", wx.OK | wx.ICON_WARNING)
+                return  # Don't update the mask if the result is empty
+            
+            # Create a new mask matrix with the correct format
+            new_mask = np.zeros_like(mask_matrix)
+            
+            # Set the border values to 1 (required for InVesalius mask format)
+            new_mask[0, :, :] = 1
+            new_mask[:, 0, :] = 1
+            new_mask[:, :, 0] = 1
+            
+            # Update the mask with the result (255 for foreground voxels)
+            # Convert the boolean result to uint8 and apply to the mask
+            result_array = np.zeros_like(binary_mask, dtype=np.uint8)
+            result_array[result] = 255
+            new_mask[1:, 1:, 1:] = result_array
+            
+            # Log information about the new mask
+            logger.info(f"New mask non-zero elements: {np.count_nonzero(new_mask)}")
+            logger.info(f"New mask shape: {new_mask.shape}")
             
             # Update the mask in the project
-            current_mask.matrix = mask_matrix
+            current_mask.matrix = new_mask
+            current_mask.was_edited = True
             current_mask.modified()
-            logger.info("Mask updated in project")
             
-            # Update the visualization
+            # Update the visualization in the correct order
             Publisher.sendMessage('Reload actual slice')
+            Publisher.sendMessage('Update slice viewer')
+            Publisher.sendMessage('Update slice 3d')
             logger.info("Visualization updated")
             
-            # Show success message
-            wx.MessageBox(f"{op_name} with radius {radius} applied successfully.", 
-                         "Operation Complete", wx.OK | wx.ICON_INFORMATION)
-                         
         except Exception as e:
             logger.error(f"Error during morphological operation: {str(e)}", exc_info=True)
             wx.MessageBox(f"Error applying morphological operation: {str(e)}", 
